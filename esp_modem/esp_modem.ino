@@ -191,9 +191,10 @@ void loop()
       {
         cmd.remove(cmd.length() - 1);
         // We don't assume that backspace is destructive
-        Serial.print(8);
-        Serial.print(" ");
-        Serial.print(8);
+        // Clear with a space
+        Serial.write(8);
+        Serial.write(' ');
+        Serial.write(8);
       }
       else
       {

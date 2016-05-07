@@ -14,7 +14,7 @@ AT command examples
 * Change baud rate: AT115200
 * Connect to WIFI: ATWIFIMyAccessPoint,MyPassword1234
 * Connect by TCP: ATDTsome.bbs.com:23
-* Disable telnet command parsing: ATT0
+* Disable telnet command handling: ATT0
 
 Note that the key and port are optional parameters. Port defaults to 23. All parameters are case sensitive, the command itself not. You must always connect to an access point before dialing, otherwise you get an error. When you connect to WIFI you get either OK or ERROR after a while, depending on if it succeeded. If you get ERROR the connection might still occur by itself some time later, in case you had a slow AP or slow DHCP server in the network. When dialing, you get either CONNECT when successfully connected or ERROR if the connection couldn't be made. Reasons can be that the remote service is down or the host name is mistyped.
 
