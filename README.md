@@ -8,12 +8,13 @@ Overview
 
 ESP8266 is a tiny MCU module with WIFI. It already contains a virtual modem firmware by factory but I wanted to make one myself to support a wider range of baud rates. For example Commodore 64 requires 2400 or lower. Now it is also possible to add additional features in the future because this is open source. For example, translation tables for different character sets or file transfer protocol conversions on the fly with help of a buffer in MCU memory.
 
-AT commands available
----------------------
+AT command examples
+-------------------
 
-To change baud rate: AT<baud>
-To connect to WIFI: ATWIFI<ssid>,<key>
-To connect by TCP: ATDT<host>:<port>
+* Change baud rate: AT115200
+* Connect to WIFI: ATWIFIMyAccessPoint,MyPassword1234
+* Connect by TCP: ATDTsome.bbs.com:23
+* Disable telnet command parsing: ATT0
 
 Note that the key and port are optional parameters. Port defaults to 23. All parameters are case sensitive, the command itself not. You must always connect to an access point before dialing, otherwise you get an error. When you connect to WIFI you get either OK or ERROR after a while, depending on if it succeeded. If you get ERROR the connection might still occur by itself some time later, in case you had a slow AP or slow DHCP server in the network. When dialing, you get either CONNECT when successfully connected or ERROR if the connection couldn't be made. Reasons can be that the remote service is down or the host name is mistyped.
 
@@ -38,3 +39,18 @@ Example communication
 	        \| | |   |  | |/  //   // //  \\    \\     \| | |   |  | |/
 	          \|..\./...|/   /////// ////\\\\    \\      \|..\./...|/
 
+A more detailed example can be seen on my YouTube video at: https://youtu.be/oiP5Clx3D_s
+
+Hints
+-----
+
+The module can also be used for other than telnet connections, for example you can connect to HTTP port, send a HTTP request and receive a response.
+
+I made a 3D printable case for the module: http://www.thingiverse.com/thing:1545605
+
+Future plans
+------------
+
+* Make the module to listen for connections when not connected
+* If someone connects, keep printing RING and expect ATA
+* Integrated HTTP GET support, for example: ATGEThttp://url/?param=123

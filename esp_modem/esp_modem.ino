@@ -22,9 +22,11 @@
 String cmd = "";
 WiFiClient tcpClient;
 bool cmdMode = true;
+bool telnet = true;
 #define SWITCH_PIN 0     // GPIO0 (programmind mode pin)
 #define DEFAULT_BPS 2400 // 2400 safe for all old computers including C64
 //#define USE_SWITCH 1
+//#define DEBUG 1          // Comment out for normal use!
 
 /**
  * Arduino main init function
@@ -41,9 +43,10 @@ void setup()
   Serial.println("Virtual modem");
   Serial.println("=============");
   Serial.println();
-  Serial.println("To connect to WIFI: ATWIFI<ssid>,<key>");
-  Serial.println("To change baud rate: AT<baud>");
-  Serial.println("To connect by TCP: ATDT<host>:<port>");
+  Serial.println("Connect to WIFI: ATWIFI<ssid>,<key>");
+  Serial.println("Change terminal baud rate: AT<baud>");
+  Serial.println("Connect by TCP: ATDT<host>:<port>");
+  Serial.println("Disable telnet command handling: ATT0");
   Serial.println();
   Serial.println("OK");
 }
@@ -148,6 +151,18 @@ void command()
   else if (upCmd == "AT57600") Serial.begin(57600);
   else if (upCmd == "AT115200") Serial.begin(115200);
 
+  /**** Change telnet mode ****/
+  else if (upCmd == "ATT0")
+  {
+    telnet = false;
+    Serial.println("OK");
+  }
+  else if (upCmd == "ATT1")
+  {
+    telnet = true;
+    Serial.println("OK");
+  }
+
   /**** Unknown command ****/
   else Serial.println("ERROR");
 
@@ -161,11 +176,26 @@ void loop()
 {  
   if (cmdMode == true)
   {
+    // In command mode - don't exchange with TCP but gather characters to a string
     if (Serial.available())
     {
       char chr = Serial.read();
-      if ((chr == '\n') || (chr == '\r')) command();
-      else 
+
+      // Return, enter, new line, carriage return.. anything goes to end the command
+      if ((chr == '\n') || (chr == '\r')) 
+      {
+        command();
+      }
+      // Backspace or delete deletes previous character
+      else if ((chr == 8) || (chr == 127))
+      {
+        cmd.remove(cmd.length() - 1);
+        // We don't assume that backspace is destructive
+        Serial.print(8);
+        Serial.print(" ");
+        Serial.print(8);
+      }
+      else
       {
         cmd.concat(chr);
         Serial.print(chr);
@@ -174,8 +204,52 @@ void loop()
   }
   else
   {
+    // Transmit from terminal to TCP
     if (Serial.available()) tcpClient.write(Serial.read());
-    if (tcpClient.available() && Serial.availableForWrite()) Serial.write(tcpClient.read());
+
+    // Transmit from TCP to terminal (if TX buffer is not full)
+    if (tcpClient.available() && Serial.availableForWrite()) 
+    {
+      uint8_t rxByte = tcpClient.read();
+      
+      // Is a telnet control code starting?
+      if ((telnet == true) && (rxByte == 0xff))
+      {
+        #ifdef DEBUG
+        Serial.print("<telnet>");
+        #endif
+        rxByte = tcpClient.read();
+        if (rxByte == 0xff)
+        {
+          // 2 times 0xff is just an escaped real 0xff
+          Serial.write(0xff);
+        }
+        else
+        {
+          // rxByte has now the first byte of the actual non-escaped control code
+          #ifdef DEBUG
+          Serial.print(rxByte);
+          Serial.print(",");
+          #endif
+          
+          rxByte = tcpClient.read();
+          // rxByte has now the second byte of the actual non-escaped control code
+          #ifdef DEBUG
+          Serial.print(rxByte);
+          #endif
+          
+          // We don't need to do anything with the known control code
+        }
+        #ifdef DEBUG
+        Serial.print("</telnet>");
+        #endif
+      }
+      else
+      {
+        // Non-control codes pass through freely
+        Serial.write(rxByte);
+      }
+    }
   }
 
   // Disconnect if programming mode PIN (GPIO0) is switched to GND
