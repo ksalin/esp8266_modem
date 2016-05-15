@@ -51,6 +51,4 @@ I made a 3D printable case for the module: http://www.thingiverse.com/thing:1545
 Future plans
 ------------
 
-* Make the module to listen for connections when not connected
-* If someone connects, keep printing RING and expect ATA
-* Integrated HTTP GET support, for example: ATGEThttp://url/?param=123
+* It seems quite complete for me but please send ideas

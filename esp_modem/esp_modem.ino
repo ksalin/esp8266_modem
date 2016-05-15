@@ -19,14 +19,21 @@
 #include <ESP8266WiFi.h>
 
 // Global variables
-String cmd = "";
-WiFiClient tcpClient;
-bool cmdMode = true;
-bool telnet = true;
-#define SWITCH_PIN 0     // GPIO0 (programmind mode pin)
-#define DEFAULT_BPS 2400 // 2400 safe for all old computers including C64
-//#define USE_SWITCH 1
+String cmd = "";           // Gather a new AT command to this string from serial
+bool cmdMode = true;       // Are we in AT command mode or connected mode
+bool telnet = true;        // Is telnet control code handling enabled
+#define SWITCH_PIN 0       // GPIO0 (programmind mode pin)
+#define DEFAULT_BPS 2400   // 2400 safe for all old computers including C64
+//#define USE_SWITCH 1     // Use a software reset switch
 //#define DEBUG 1          // Comment out for normal use!
+#define LISTEN_PORT 23     // Listen to this if not connected. Set to zero to disable.
+#define RING_INTERVAL 3000 // How often to print RING when having a new incoming connection (ms)
+WiFiClient tcpClient;
+WiFiServer tcpServer(LISTEN_PORT);
+unsigned long lastRingMs;  // Time of last "RING" message (millis())
+long myBps;                // What is the current BPS setting
+#define MAX_CMD_LENGTH 256 // Maximum length for AT command
+char plusCount = 0;        // Go to AT mode at "+++" sequence, that has to be counted
 
 /**
  * Arduino main init function
@@ -34,6 +41,7 @@ bool telnet = true;
 void setup()
 {
   Serial.begin(DEFAULT_BPS);
+  myBps = DEFAULT_BPS;
 
 #ifdef USE_SWITCH
   pinMode(SWITCH_PIN, INPUT);
@@ -46,8 +54,22 @@ void setup()
   Serial.println("Connect to WIFI: ATWIFI<ssid>,<key>");
   Serial.println("Change terminal baud rate: AT<baud>");
   Serial.println("Connect by TCP: ATDT<host>:<port>");
+  Serial.println("See my IP address: ATIP");
   Serial.println("Disable telnet command handling: ATT0");
+  Serial.println("HTTP GET: ATGET<URL>");
   Serial.println();
+  if (LISTEN_PORT > 0)
+  {
+    Serial.print("Listening to connections at port ");
+    Serial.print(LISTEN_PORT);
+    Serial.println(", which result in RING and you can answer with ATA.");
+    tcpServer.begin();
+  }
+  else
+  {
+    Serial.println("Incoming connections are disabled.");
+  }
+  Serial.println("");
   Serial.println("OK");
 }
 
@@ -62,11 +84,13 @@ void command()
   String upCmd = cmd;
   upCmd.toUpperCase();
 
+  long newBps = 0;
+
   /**** Just AT ****/
   if (upCmd == "AT") Serial.println("OK");
   
   /**** Dial to host ****/
-  else if (upCmd.indexOf("ATDT") == 0)
+  else if ((upCmd.indexOf("ATDT") == 0) || (upCmd.indexOf("ATDP") == 0) || (upCmd.indexOf("ATDI") == 0))
   {
     int portIndex = cmd.indexOf(":");
     String host, port;
@@ -87,11 +111,15 @@ void command()
     char *hostChr = new char[host.length() + 1];
     host.toCharArray(hostChr, host.length() + 1);
     int portInt = port.toInt();
+    tcpClient.setNoDelay(true); // Try to disable naggle
     if (tcpClient.connect(hostChr, portInt))
     {
-      Serial.println("CONNECT");
+      tcpClient.setNoDelay(true); // Try to disable naggle
+      Serial.print("CONNECT ");
+      Serial.println(myBps);
       cmdMode = false;
       Serial.flush();
+      if (LISTEN_PORT > 0) tcpServer.stop();
     }
     else
     {
@@ -142,14 +170,14 @@ void command()
   }
 
   /**** Change baud rate from default ****/
-  else if (upCmd == "AT300") Serial.begin(300);
-  else if (upCmd == "AT1200") Serial.begin(1200);
-  else if (upCmd == "AT2400") Serial.begin(2400);
-  else if (upCmd == "AT9600") Serial.begin(9600);
-  else if (upCmd == "AT19200") Serial.begin(19200);
-  else if (upCmd == "AT38400") Serial.begin(38400);
-  else if (upCmd == "AT57600") Serial.begin(57600);
-  else if (upCmd == "AT115200") Serial.begin(115200);
+  else if (upCmd == "AT300") newBps = 300;
+  else if (upCmd == "AT1200") newBps = 1200;
+  else if (upCmd == "AT2400") newBps = 2400;
+  else if (upCmd == "AT9600") newBps = 9600;
+  else if (upCmd == "AT19200") newBps = 19200;
+  else if (upCmd == "AT38400") newBps = 38400;
+  else if (upCmd == "AT57600") newBps = 57600;
+  else if (upCmd == "AT115200") newBps = 115200;
 
   /**** Change telnet mode ****/
   else if (upCmd == "ATT0")
@@ -163,8 +191,95 @@ void command()
     Serial.println("OK");
   }
 
+  /**** Answer to incoming connection ****/
+  else if ((upCmd == "ATA") && tcpServer.hasClient())
+  {
+    tcpClient = tcpServer.available();
+    tcpClient.setNoDelay(true); // try to disable naggle
+    tcpServer.stop();
+    Serial.print("CONNECT ");
+    Serial.println(myBps);
+    cmdMode = false;
+    Serial.flush();
+  }
+
+  /**** See my IP address ****/
+  else if (upCmd == "ATIP")
+  {
+    Serial.println(WiFi.localIP());
+    Serial.println("OK");
+  }
+
+  /**** HTTP GET request ****/
+  else if (upCmd.indexOf("ATGET") == 0)
+  {
+    // From the URL, aquire required variables
+    // (12 = "ATGEThttp://")
+    int portIndex = cmd.indexOf(":", 12); // Index where port number might begin
+    int pathIndex = cmd.indexOf("/", 12); // Index first host name and possible port ends and path begins
+    int port;
+    String path, host;
+    if (pathIndex < 0)
+    {
+      pathIndex = cmd.length();
+    }
+    if (portIndex < 0)
+    {
+      port = 80;
+      portIndex = pathIndex;
+    }
+    else
+    {
+      port = cmd.substring(portIndex+1, pathIndex).toInt();
+    }
+    host = cmd.substring(12, portIndex);
+    path = cmd.substring(pathIndex, cmd.length());
+    if (path == "") path = "/";
+    char *hostChr = new char[host.length() + 1];
+    host.toCharArray(hostChr, host.length() + 1);
+
+    // Debug
+    Serial.print("Getting path ");
+    Serial.print(path);
+    Serial.print(" from port ");
+    Serial.print(port);
+    Serial.print(" of host ");
+    Serial.print(host);
+    Serial.println("...");
+
+    // Establish connection
+    if (!tcpClient.connect(hostChr, port))
+    {
+      Serial.println("NO CARRIER");
+    }
+    else
+    {
+      Serial.print("CONNECT ");
+      Serial.println(myBps);
+      cmdMode = false;
+
+      // Send a HTTP request before continuing the connection as usual
+      String request = "GET ";
+      request += path;
+      request += " HTTP/1.1\r\nHost: ";
+      request += host;
+      request += "\r\nConnection: close\r\n\r\n";
+      tcpClient.print(request);
+    }
+    delete hostChr;
+  }
+
   /**** Unknown command ****/
   else Serial.println("ERROR");
+
+  /**** Tasks to do after command has been parsed ****/
+  if (newBps)
+  {
+    Serial.println("OK");
+    delay(150); // Sleep enough for 4 bytes at any previous baud rate to finish ("\nOK\n")
+    Serial.begin(newBps);
+    myBps = newBps;
+  }
 
   cmd = "";
 }
@@ -173,9 +288,21 @@ void command()
  * Arduino main loop function
  */     
 void loop()
-{  
+{
+  /**** AT command mode ****/
   if (cmdMode == true)
   {
+    // In command mode but new unanswered incoming connection on server listen socket
+    if ((LISTEN_PORT > 0) && (tcpServer.hasClient()))
+    {
+      // Print RING every now and then while the new incoming connection exists
+      if ((millis() - lastRingMs) > RING_INTERVAL)
+      {
+        Serial.println("RING");
+        lastRingMs = millis();
+      }
+    }
+    
     // In command mode - don't exchange with TCP but gather characters to a string
     if (Serial.available())
     {
@@ -198,21 +325,36 @@ void loop()
       }
       else
       {
-        cmd.concat(chr);
+        if (cmd.length() < MAX_CMD_LENGTH) cmd.concat(chr);
         Serial.print(chr);
       }
     }
   }
+  /**** Connected mode ****/
   else
   {
     // Transmit from terminal to TCP
-    if (Serial.available()) tcpClient.write(Serial.read());
+    if (Serial.available())
+    {
+      uint8_t rxByte = Serial.read();
+      
+      // Disconnect if going to AT mode with "+++" sequence
+      if (rxByte == '+') plusCount++; else plusCount=0;
+      if (plusCount >=3)
+      {
+        tcpClient.stop();
+        return;
+      }
+      
+      tcpClient.write(rxByte);
+      //tcpClient.write(Serial.read());
+    }
 
     // Transmit from TCP to terminal (if TX buffer is not full)
     if (tcpClient.available() && Serial.availableForWrite()) 
     {
       uint8_t rxByte = tcpClient.read();
-      
+
       // Is a telnet control code starting?
       if ((telnet == true) && (rxByte == 0xff))
       {
@@ -266,5 +408,6 @@ void loop()
   {
     cmdMode = true;
     Serial.println("NO CARRIER");
+    if (LISTEN_PORT > 0) tcpServer.begin();
   }
 }
