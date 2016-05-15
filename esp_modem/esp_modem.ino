@@ -30,10 +30,22 @@ bool telnet = true;        // Is telnet control code handling enabled
 #define RING_INTERVAL 3000 // How often to print RING when having a new incoming connection (ms)
 WiFiClient tcpClient;
 WiFiServer tcpServer(LISTEN_PORT);
-unsigned long lastRingMs;  // Time of last "RING" message (millis())
+unsigned long lastRingMs=0;// Time of last "RING" message (millis())
 long myBps;                // What is the current BPS setting
 #define MAX_CMD_LENGTH 256 // Maximum length for AT command
 char plusCount = 0;        // Go to AT mode at "+++" sequence, that has to be counted
+#define LED_PIN 2          // Status LED
+#define LED_TIME 1         // How many ms to keep LED on at activity
+unsigned long ledTime = 0;
+
+// Telnet codes
+#define DO 0xfd
+#define WONT 0xfc
+#define WILL 0xfb
+#define DONT 0xfe
+#define CMD 0xff
+#define CMD_ECHO 1
+#define CMD_WINDOW_SIZE 31
 
 /**
  * Arduino main init function
@@ -55,7 +67,7 @@ void setup()
   Serial.println("Change terminal baud rate: AT<baud>");
   Serial.println("Connect by TCP: ATDT<host>:<port>");
   Serial.println("See my IP address: ATIP");
-  Serial.println("Disable telnet command handling: ATT0");
+  Serial.println("Disable telnet command handling: ATNET0");
   Serial.println("HTTP GET: ATGET<URL>");
   Serial.println();
   if (LISTEN_PORT > 0)
@@ -71,6 +83,18 @@ void setup()
   }
   Serial.println("");
   Serial.println("OK");
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH);
+}
+
+/**
+ * Turn on the LED and store the time, so the LED will be shortly after turned off
+ */
+void led_on(void)
+{
+  digitalWrite(LED_PIN, LOW);
+  ledTime = millis();
 }
 
 /**
@@ -180,12 +204,12 @@ void command()
   else if (upCmd == "AT115200") newBps = 115200;
 
   /**** Change telnet mode ****/
-  else if (upCmd == "ATT0")
+  else if (upCmd == "ATNET0")
   {
     telnet = false;
     Serial.println("OK");
   }
-  else if (upCmd == "ATT1")
+  else if (upCmd == "ATNET1")
   {
     telnet = true;
     Serial.println("OK");
@@ -336,6 +360,7 @@ void loop()
     // Transmit from terminal to TCP
     if (Serial.available())
     {
+      led_on();
       uint8_t rxByte = Serial.read();
       
       // Disconnect if going to AT mode with "+++" sequence
@@ -347,12 +372,12 @@ void loop()
       }
       
       tcpClient.write(rxByte);
-      //tcpClient.write(Serial.read());
     }
 
     // Transmit from TCP to terminal (if TX buffer is not full)
     if (tcpClient.available() && Serial.availableForWrite()) 
     {
+      led_on();
       uint8_t rxByte = tcpClient.read();
 
       // Is a telnet control code starting?
@@ -374,14 +399,31 @@ void loop()
           Serial.print(rxByte);
           Serial.print(",");
           #endif
-          
+          uint8_t cmdByte1 = rxByte;
           rxByte = tcpClient.read();
+          uint8_t cmdByte2 = rxByte;
           // rxByte has now the second byte of the actual non-escaped control code
           #ifdef DEBUG
           Serial.print(rxByte);
           #endif
-          
-          // We don't need to do anything with the known control code
+          // Screen size requested - report the standard 80x24
+          if ((cmdByte1 == DO) && (cmdByte2 == CMD_WINDOW_SIZE)) 
+          {
+            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)251); tcpClient.write((uint8_t)31);
+            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)250); tcpClient.write((uint8_t)31);
+            tcpClient.write((uint8_t)0);   tcpClient.write((uint8_t)80);  tcpClient.write((uint8_t)0);
+            tcpClient.write((uint8_t)24);  tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)240);
+          }
+          // We are asked to do some other option, respond we won't
+          else if (cmdByte1 == DO) 
+          {
+            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)WONT); tcpClient.write(cmdByte2);
+          }
+          // Server wants to do any option, allow it
+          else if (cmdByte1 == WILL) 
+          {
+            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)DO); tcpClient.write(cmdByte2);
+          }
         }
         #ifdef DEBUG
         Serial.print("</telnet>");
@@ -410,4 +452,6 @@ void loop()
     Serial.println("NO CARRIER");
     if (LISTEN_PORT > 0) tcpServer.begin();
   }
+
+  if (millis() - ledTime > LED_TIME) digitalWrite(LED_PIN, HIGH);
 }
