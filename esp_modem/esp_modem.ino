@@ -17,15 +17,18 @@
  */
 
 #include <ESP8266WiFi.h>
+#include <algorithm>
 
 // Global variables
 String cmd = "";           // Gather a new AT command to this string from serial
 bool cmdMode = true;       // Are we in AT command mode or connected mode
 bool telnet = true;        // Is telnet control code handling enabled
 #define SWITCH_PIN 0       // GPIO0 (programmind mode pin)
-#define DEFAULT_BPS 2400   // 2400 safe for all old computers including C64
+#define DEFAULT_BPS 115200 // 2400 safe for all old computers including C64
 //#define USE_SWITCH 1     // Use a software reset switch
-//#define DEBUG 1          // Comment out for normal use!
+//#define DEBUG 1          // Print additional debug information to serial channel
+#undef DEBUG
+#undef USE_SWITCH
 #define LISTEN_PORT 23     // Listen to this if not connected. Set to zero to disable.
 #define RING_INTERVAL 3000 // How often to print RING when having a new incoming connection (ms)
 WiFiClient tcpClient;
@@ -37,6 +40,8 @@ char plusCount = 0;        // Go to AT mode at "+++" sequence, that has to be co
 #define LED_PIN 2          // Status LED
 #define LED_TIME 1         // How many ms to keep LED on at activity
 unsigned long ledTime = 0;
+#define TX_BUF_SIZE 128
+uint8_t txBuf[TX_BUF_SIZE];
 
 // Telnet codes
 #define DO 0xfd
@@ -361,17 +366,21 @@ void loop()
     if (Serial.available())
     {
       led_on();
-      uint8_t rxByte = Serial.read();
+      size_t len = std::min(Serial.available(), TX_BUF_SIZE);
+      Serial.readBytes(&txBuf[0], len);
       
       // Disconnect if going to AT mode with "+++" sequence
-      if (rxByte == '+') plusCount++; else plusCount=0;
+      /*if (rxByte == '+') plusCount++; else plusCount=0;
       if (plusCount >=3)
       {
         tcpClient.stop();
         return;
-      }
-      
-      tcpClient.write(rxByte);
+      }*/
+
+      //delayMicroseconds(100); // 79
+      //delay(1);
+      tcpClient.write(&txBuf[0], len);
+      yield();
     }
 
     // Transmit from TCP to terminal (if TX buffer is not full)
@@ -407,7 +416,7 @@ void loop()
           Serial.print(rxByte);
           #endif
           // Screen size requested - report the standard 80x24
-          if ((cmdByte1 == DO) && (cmdByte2 == CMD_WINDOW_SIZE)) 
+          /*if ((cmdByte1 == DO) && (cmdByte2 == CMD_WINDOW_SIZE)) 
           {
             tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)251); tcpClient.write((uint8_t)31);
             tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)250); tcpClient.write((uint8_t)31);
@@ -415,7 +424,7 @@ void loop()
             tcpClient.write((uint8_t)24);  tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)240);
           }
           // We are asked to do some other option, respond we won't
-          else if (cmdByte1 == DO) 
+          else*/ if (cmdByte1 == DO) 
           {
             tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)WONT); tcpClient.write(cmdByte2);
           }
