@@ -40,7 +40,9 @@ char plusCount = 0;        // Go to AT mode at "+++" sequence, that has to be co
 #define LED_PIN 2          // Status LED
 #define LED_TIME 1         // How many ms to keep LED on at activity
 unsigned long ledTime = 0;
-#define TX_BUF_SIZE 128
+#define TX_BUF_SIZE 256    // Buffer where to read from serial before writing to TCP
+                           // (that direction is very blocking by the ESP TCP stack,
+                           // so we can't do one byte a time.)
 uint8_t txBuf[TX_BUF_SIZE];
 
 // Telnet codes
@@ -48,9 +50,6 @@ uint8_t txBuf[TX_BUF_SIZE];
 #define WONT 0xfc
 #define WILL 0xfb
 #define DONT 0xfe
-#define CMD 0xff
-#define CMD_ECHO 1
-#define CMD_WINDOW_SIZE 31
 
 /**
  * Arduino main init function
@@ -363,22 +362,52 @@ void loop()
   else
   {
     // Transmit from terminal to TCP
-    if (Serial.available())
+    if (Serial.available() && (!tcpClient.available()))
     {
       led_on();
-      size_t len = std::min(Serial.available(), TX_BUF_SIZE);
+
+      // In telnet in worst case we have to escape every byte
+      // so leave half of the buffer always free
+      int max_buf_size;
+      if (telnet == true)
+        max_buf_size = TX_BUF_SIZE / 2;
+      else
+        max_buf_size = TX_BUF_SIZE;
+
+      // Read from serial, the amount available up to
+      // maximum size of the buffer
+      size_t len = std::min(Serial.available(), max_buf_size);
       Serial.readBytes(&txBuf[0], len);
       
       // Disconnect if going to AT mode with "+++" sequence
-      /*if (rxByte == '+') plusCount++; else plusCount=0;
-      if (plusCount >=3)
+      for (int i=0; i<(int)len; i++)
       {
-        tcpClient.stop();
-        return;
-      }*/
+        if (txBuf[i] == '+') plusCount++; else plusCount = 0;
+        if (plusCount >= 3)
+        {
+          tcpClient.stop();
+          return;
+        }
+      }
 
-      //delayMicroseconds(100); // 79
-      //delay(1);
+      // Double (escape) every 0xff for telnet, shifting following bytes
+      // towards the end of the buffer at that point
+      if (telnet == true)
+      {
+        for (int i = len - 1; i >= 0; i--)
+        {
+          if (txBuf[i] == 0xff)
+          {
+            for (int j = TX_BUF_SIZE - 1; j > i; j--)
+            {
+              txBuf[j] = txBuf[j - 1];
+            }
+            len++;
+          }
+        }
+      }
+
+      // Write the buffer to TCP finally
       tcpClient.write(&txBuf[0], len);
       yield();
     }
@@ -415,16 +444,8 @@ void loop()
           #ifdef DEBUG
           Serial.print(rxByte);
           #endif
-          // Screen size requested - report the standard 80x24
-          /*if ((cmdByte1 == DO) && (cmdByte2 == CMD_WINDOW_SIZE)) 
-          {
-            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)251); tcpClient.write((uint8_t)31);
-            tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)250); tcpClient.write((uint8_t)31);
-            tcpClient.write((uint8_t)0);   tcpClient.write((uint8_t)80);  tcpClient.write((uint8_t)0);
-            tcpClient.write((uint8_t)24);  tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)240);
-          }
-          // We are asked to do some other option, respond we won't
-          else*/ if (cmdByte1 == DO) 
+          // We are asked to do some option, respond we won't
+          if (cmdByte1 == DO) 
           {
             tcpClient.write((uint8_t)255); tcpClient.write((uint8_t)WONT); tcpClient.write(cmdByte2);
           }
