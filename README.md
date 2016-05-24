@@ -18,10 +18,11 @@ AT command examples
 * Get my IP: ATIP
 * Make a HTTP GET request: ATGEThttp://host:80/path
 * Answer a RING: ATA
+* Disconnect: +++ (following a delay of a second)
 
 Note that the key and port are optional parameters. Port defaults to 23. All parameters are case sensitive, the command itself not. You must always connect to an access point before dialing, otherwise you get an error. When you connect to WIFI you get either OK or ERROR after a while, depending on if it succeeded. If you get ERROR the connection might still occur by itself some time later, in case you had a slow AP or slow DHCP server in the network. When dialing, you get either CONNECT when successfully connected or ERROR if the connection couldn't be made. Reasons can be that the remote service is down or the host name is mistyped.
 
-Baud rate is 2400 by default and you must always have that on the terminal when powering on. After giving a command for a higher rate nothing is replied, just switch to the new baud rate in your terminal as well. Then you can give next command in the new baud rate. Note that the first command after switching baud rate might fail because the serial port hardware is not fully synchronized yet, so it might be good idea to simply give "AT" command and wait for "ERROR" or "OK" before giving an actual command.
+Default Baud rate is defined in the code. 2400 is safe for C64 and 19200 for any PC and Amiga. 115200 for PC's with "new" 16550 UART.  You must always have that default rate on the terminal when powering on. After giving a command for a higher rate nothing is replied, just switch to the new baud rate in your terminal as well. Then you can give next command in the new baud rate. Note that the first command after switching baud rate might fail because the serial port hardware is not fully synchronized yet, so it might be good idea to simply give "AT" command and wait for "ERROR" or "OK" before giving an actual command.
 
 Example communication
 ---------------------
@@ -49,9 +50,11 @@ Hints
 
 The module can also be used for other than telnet connections, for example you can connect to HTTP port, send a HTTP request and receive a response.
 
-I made a 3D printable case for the module: http://www.thingiverse.com/thing:1545605
+I made a 3D printable case for the C64: http://www.thingiverse.com/thing:1545605 If you build it for any other device you can use any generic case because you need room for a RS232 level converter such as MAX232, and you do not need holes for any rare connectors.
 
-Future plans
-------------
+Future plans and status
+-----------------------
 
-* It seems quite complete for me but please send ideas
+* It seems quite complete for me but please send ideas.
+* I tested huge transfers with ZModem, seems to be working. Remember to use -e parameter with sz and rz if using over a telnetd.
+* Serial multiplayer game of Doom (sersetup.exe) seems to be also working. Remember to use ATNET0 when playing serial games, also on DosBox emulator if it's the other host.

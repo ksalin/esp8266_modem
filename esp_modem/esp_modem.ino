@@ -37,6 +37,7 @@ unsigned long lastRingMs=0;// Time of last "RING" message (millis())
 long myBps;                // What is the current BPS setting
 #define MAX_CMD_LENGTH 256 // Maximum length for AT command
 char plusCount = 0;        // Go to AT mode at "+++" sequence, that has to be counted
+unsigned long plusTime = 0;// When did we last receive a "+++" sequence
 #define LED_PIN 2          // Status LED
 #define LED_TIME 1         // How many ms to keep LED on at activity
 unsigned long ledTime = 0;
@@ -362,7 +363,7 @@ void loop()
   else
   {
     // Transmit from terminal to TCP
-    if (Serial.available() && (!tcpClient.available()))
+    if (Serial.available())
     {
       led_on();
 
@@ -385,13 +386,16 @@ void loop()
         if (txBuf[i] == '+') plusCount++; else plusCount = 0;
         if (plusCount >= 3)
         {
-          tcpClient.stop();
-          return;
+          plusTime = millis();
+        }
+        if (txBuf[i] != '+')
+        {
+          plusCount = 0;
         }
       }
 
-      // Double (escape) every 0xff for telnet, shifting following bytes
-      // towards the end of the buffer at that point
+      // Double (escape) every 0xff for telnet, shifting the following bytes
+      // towards the end of the buffer from that point
       if (telnet == true)
       {
         for (int i = len - 1; i >= 0; i--)
@@ -412,8 +416,8 @@ void loop()
       yield();
     }
 
-    // Transmit from TCP to terminal (if TX buffer is not full)
-    if (tcpClient.available() && Serial.availableForWrite()) 
+    // Transmit from TCP to terminal
+    while (tcpClient.available()) 
     {
       led_on();
       uint8_t rxByte = tcpClient.read();
@@ -422,13 +426,13 @@ void loop()
       if ((telnet == true) && (rxByte == 0xff))
       {
         #ifdef DEBUG
-        Serial.print("<telnet>");
+        Serial.print("<t>");
         #endif
         rxByte = tcpClient.read();
         if (rxByte == 0xff)
         {
           // 2 times 0xff is just an escaped real 0xff
-          Serial.write(0xff);
+          Serial.write(0xff); Serial.flush();
         }
         else
         {
@@ -442,7 +446,7 @@ void loop()
           uint8_t cmdByte2 = rxByte;
           // rxByte has now the second byte of the actual non-escaped control code
           #ifdef DEBUG
-          Serial.print(rxByte);
+          Serial.print(rxByte); Serial.flush();
           #endif
           // We are asked to do some option, respond we won't
           if (cmdByte1 == DO) 
@@ -456,13 +460,13 @@ void loop()
           }
         }
         #ifdef DEBUG
-        Serial.print("</telnet>");
+        Serial.print("</t>");
         #endif
       }
       else
       {
         // Non-control codes pass through freely
-        Serial.write(rxByte);
+        Serial.write(rxByte); Serial.flush();
       }
     }
   }
@@ -475,6 +479,17 @@ void loop()
   }
 #endif
 
+  // If we have received "+++" as last bytes from serial port and there
+  // has been over a second without any more bytes, disconnect
+  if (plusCount >= 3)
+  {
+    if (millis() - plusTime > 1000)
+    {
+      tcpClient.stop();
+      plusCount = 0;
+    }
+  }
+
   // Go to command mode if TCP disconnected and not in command mode
   if ((!tcpClient.connected()) && (cmdMode == false))
   {
@@ -483,5 +498,6 @@ void loop()
     if (LISTEN_PORT > 0) tcpServer.begin();
   }
 
+  // Turn off tx/rx led if it has been lit long enough to be visible
   if (millis() - ledTime > LED_TIME) digitalWrite(LED_PIN, HIGH);
 }
